@@ -1,30 +1,39 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import minify_html from './utils/minify_html';
-import { create_compilers, create_app, create_manifest_data, create_serviceworker_manifest } from '../core';
-import { copy_shimport } from './utils/copy_shimport';
-import read_template from '../core/read_template';
-import { CompileResult } from '../core/create_compilers/interfaces';
-import { noop } from './utils/noop';
-import validate_bundler from './utils/validate_bundler';
-import { copy_runtime } from './utils/copy_runtime';
-import { rimraf, mkdirp } from './utils/fs_utils';
+'use strict';
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var path = require('path');
+var path__default = _interopDefault(path);
+var fs = require('fs');
+require('./chunk2.js');
+var core = require('./core.js');
+require('module');
+require('./index.js');
+require('string-hash');
+require('sourcemap-codec');
+require('./chunk3.js');
+require('svelte/compiler');
+var __chunk_4 = require('./chunk4.js');
+var __chunk_5 = require('./chunk5.js');
+require('html-minifier');
+var __chunk_6 = require('./chunk6.js');
+
 const precinct = require("precinct");
 
-type Opts = {
-	cwd?: string;
-	src?: string;
-	routes?: string;
-	dest?: string;
-	output?: string;
-	static?: string;
-	legacy?: boolean;
-	bundler?: 'rollup' | 'webpack';
-	ext?: string;
-	oncompile?: ({ type, result }: { type: string, result: CompileResult }) => void;
-};
 
-export async function build({
+
+
+
+
+
+
+
+
+
+
+
+
+async function build({
 	cwd,
 	src = 'src',
 	routes = 'src/routes',
@@ -35,9 +44,9 @@ export async function build({
 	bundler,
 	legacy = false,
 	ext,
-	oncompile = noop
-}: Opts = {}) {
-	bundler = validate_bundler(bundler);
+	oncompile = __chunk_5.noop
+} = {}) {
+	bundler = __chunk_4.validate_bundler(bundler);
 
 	cwd = path.resolve(cwd);
 	src = path.resolve(cwd, src);
@@ -50,17 +59,17 @@ export async function build({
 		throw new Error(`Legacy builds are not supported for projects using webpack`);
 	}
 
-	rimraf(output);
-	mkdirp(output);
-	copy_runtime(output);
+	__chunk_5.rimraf(output);
+	__chunk_5.mkdirp(output);
+	__chunk_4.copy_runtime(output);
 
-	rimraf(dest);
-	mkdirp(`${dest}/client`);
-	copy_shimport(dest);
+	__chunk_5.rimraf(dest);
+	__chunk_5.mkdirp(`${dest}/client`);
+	__chunk_4.copy_shimport(dest);
 
 	// minify src/template.html
 	// TODO compile this to a function? could be quicker than str.replace(...).replace(...).replace(...)
-	const template = read_template(src);
+	const template = __chunk_4.read_template(src);
 
 	// remove this in a future version
 	if (template.indexOf('%sapper.base%') === -1) {
@@ -69,12 +78,12 @@ export async function build({
 		throw error;
 	}
 
-	fs.writeFileSync(`${dest}/template.html`, minify_html(template));
+	fs.writeFileSync(`${dest}/template.html`, __chunk_6.minify_html(template));
 
-	const manifest_data = create_manifest_data(routes, ext);
+	const manifest_data = core.create_manifest_data(routes, ext);
 
 	// create src/node_modules/@sapper/app.mjs and server.mjs
-	create_app({
+	core.create_app({
 		bundler,
 		manifest_data,
 		cwd,
@@ -85,7 +94,7 @@ export async function build({
 		dev: false
 	});
 
-	const { client, server, serviceworker } = await create_compilers(bundler, cwd, src, dest, false);
+	const { client, server, serviceworker } = await core.create_compilers(bundler, cwd, src, dest, false);
 
 	const client_result = await client.compile();
 	oncompile({
@@ -94,11 +103,10 @@ export async function build({
 	});
 
 	const build_info = client_result.to_json(manifest_data, { src, routes, dest });
-	const {pages} = manifest_data;
 
 	if (legacy) {
 		process.env.SAPPER_LEGACY_BUILD = 'true';
-		const { client } = await create_compilers(bundler, cwd, src, dest, false);
+		const { client } = await core.create_compilers(bundler, cwd, src, dest, false);
 
 		const client_result = await client.compile();
 
@@ -119,50 +127,48 @@ export async function build({
 	// TODO: Remove this
 	const appFile = fs.readdirSync(clientDir).find(filename => {
 		return filename.endsWith(".js") && filename.startsWith("app.");
-	})
+	});
 
 	const app = fs.readFileSync(path.join(clientDir, appFile ? appFile : main), "utf8");
 
-	const makeDependencyList = (filename: string): string[] => {
-		const deps: string[] = [];
+	const makeDependencyList = (filename) => {
+		const deps = [];
 
-		const add = (filename: string) => {
+		const add = (filename) => {
 			if(deps.includes(filename))
 				return;
 			
 			deps.push(filename);
 			const source = fs.readFileSync(`${clientDir}/${filename}`, "utf8");
-			const files: string[] = precinct(source, {type: "es6", es6: {mixedImports: false}});
+			const files = precinct(source, {type: "es6", es6: {mixedImports: false}});
 			files
 				.map(file => path.basename(file))
 				.filter(file => {
 					return !file.startsWith("sapper-dev-client")
 								&& file !== main
 								&& file !== appFile
-				}).forEach(add)
-		}
+				}).forEach(add);
+		};
 
 		add(filename);
 		return deps;
-	}
-
-	const mainDeps = [main];
+	};
 
 	const files = [];
-	const reg = /import\(["']\.\/(.+?)["']\)/g
+	const reg = /import\(["']\.\/(.+?)["']\)/g;
 	let match;
 	while(match = reg.exec(app)){
 		if(!match[1].startsWith("sapper-dev-client"))
 		files.push(match[1]);
 	}
 
-	const js_deps: Record<string, string[]> = {};
+	const js_deps = {};
 	Object.keys(build_info.css.chunks).forEach((key, i) => {
 		js_deps[key] = makeDependencyList(files[i]);
 	});
 	// END Add JS assets
 
-	(build_info as any).js = js_deps;
+	(build_info ).js = js_deps;
 	
 	// ADD: Preety print
 	fs.writeFileSync(path.join(dest, 'build.json'), JSON.stringify(build_info, null, 2));
@@ -181,7 +187,7 @@ export async function build({
 			.filter(chunk => !chunk.file.endsWith('.map')) // SW does not need to cache sourcemap files
 			.map(chunk => `client/${chunk.file}`);
 
-		create_serviceworker_manifest({
+		core.create_serviceworker_manifest({
 			manifest_data,
 			output,
 			client_files,
@@ -196,3 +202,6 @@ export async function build({
 		});
 	}
 }
+
+exports.build = build;
+//# sourceMappingURL=build.js.map

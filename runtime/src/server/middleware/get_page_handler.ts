@@ -6,7 +6,8 @@ import devalue from 'devalue';
 import fetch from 'node-fetch';
 import URL from 'url';
 import { Manifest, Page, Req, Res } from './types';
-import { build_dir, dev, src_dir } from '@sapper/internal/manifest-server';
+
+import {manifest, build_dir, dev, src_dir } from '@sapper/internal/manifest-server';
 import App from '@sapper/internal/App.svelte';
 
 export function get_page_handler(
@@ -56,26 +57,53 @@ export function get_page_handler(
 		res.setHeader('Content-Type', 'text/html');
 		res.setHeader('Cache-Control', dev ? 'no-cache' : 'max-age=600');
 
-		// preload main.js and current route
+		// preload main.js and ¿current route?
 		// TODO detect other stuff we can preload? images, CSS, fonts?
 		let preloaded_chunks = Array.isArray(build_info.assets.main) ? build_info.assets.main : [build_info.assets.main];
-		if (!error && !is_service_worker_index) {
-			page.parts.forEach(part => {
-				if (!part) return;
+		
+		let add = (chunk: string | string[]) => {
+			if(Array.isArray(chunk)){
+				chunk.forEach(add);
+			} else if(!preloaded_chunks.includes(chunk)){
+				preloaded_chunks.push(chunk);
+			}
+		}
 
-				// using concat because it could be a string or an array. thanks webpack!
-				preloaded_chunks = preloaded_chunks.concat(build_info.assets[part.name]);
-			});
+		// ADDED: Add main css
+		add(build_info.css.main);
+				
+		if (!error && !is_service_worker_index) {
+			for(const part of page.parts.filter(Boolean)){
+
+					const key: string = (part as any).file;
+
+					// ADDED: Add page js
+					build_info.js && add(build_info.js[key]);
+
+					// ADDED: Add css dependencies: 
+					add(build_info.css.chunks[key]);
+
+					// CHANGED: i thinks this is a bug (assets are <file> keyed not <name>)
+					//preloaded_chunks = preloaded_chunks.concat(build_info.assets[part.name]);
+					// using concat because it could be a string or an array. thanks webpack!
+					//preloaded_chunks = preloaded_chunks.concat(build_info.assets[key]);
+			}
 		}
 
 		if (build_info.bundler === 'rollup') {
 			// TODO add dependencies and CSS
 			const link = preloaded_chunks
 				.filter(file => file && !file.match(/\.map$/))
-				.map(file => `<${req.baseUrl}/client/${file}>;rel="modulepreload"`)
-				.join(', ');
+				.map(file => (
+					/\.css$/.test(file) ? 
+						`<${req.baseUrl}/client/${file}>;rel=preload;as=style`: 
+						`<${req.baseUrl}/client/${file}>;rel=modulepreload`
+				))
+				.join(',');
 
-			res.setHeader('Link', link);
+			//let curr = res.getHeader("link") || "";
+			let curr = res.sapperLink || "";
+			res.setHeader('Link', (curr ? curr + "," : "") + link);
 		} else {
 			const link = preloaded_chunks
 				.filter(file => file && !file.match(/\.map$/))
@@ -257,7 +285,7 @@ export function get_page_handler(
 				}
 			}
 
-			const { html, head, css } = App.render(props);
+			let { html, head, css } = App.render(props);
 
 			const serialized = {
 				preloaded: `[${preloaded.map(data => try_serialize(data)).join(',')}]`,
@@ -320,9 +348,15 @@ export function get_page_handler(
 			// users can set a CSP nonce using res.locals.nonce
 			const nonce_attr = (res.locals && res.locals.nonce) ? ` nonce="${res.locals.nonce}"` : '';
 
+			const scripts_html = `
+<script type="text/x-template" id="sapper-script">${script}</script>
+<script${nonce_attr}>defer(function(){(0, eval)(document.getElementById("sapper-script").innerHTML)}, 1000)</script>
+`;
+
 			const body = template()
+				.replace("%sapper.lang%", () => (res as any).lang || "")
 				.replace('%sapper.base%', () => `<base href="${req.baseUrl}/">`)
-				.replace('%sapper.scripts%', () => `<script${nonce_attr}>${script}</script>`)
+				.replace('%sapper.scripts%', () => scripts_html)
 				.replace('%sapper.html%', () => html)
 				.replace('%sapper.head%', () => `<noscript id='sapper-head-start'></noscript>${head}<noscript id='sapper-head-end'></noscript>`)
 				.replace('%sapper.styles%', () => styles);
@@ -360,9 +394,10 @@ function read_template(dir = build_dir) {
 	return fs.readFileSync(`${dir}/template.html`, 'utf-8');
 }
 
-function try_serialize(data: any, fail?: (err) => void) {
+function try_serialize(data: any, fail?: (err: Error) => void) {
 	try {
-		return devalue(data);
+		//return devalue(data);
+		return `${JSON.stringify(data).replace(/<\//g, "<\\/")}`;
 	} catch (err) {
 		if (fail) fail(err);
 		return null;
